@@ -334,25 +334,6 @@ class App : Application(), CactusCallback, Configuration.Provider by Core {
         SharedPreference.init(applicationContext)
         // X系列基础库初始化
         XBasicLibInit.init(this)
-
-        try {
-            // 全局插入 Conscrypt Provider
-            java.security.Security.insertProviderAt(org.conscrypt.Conscrypt.newProvider(), 1)
-
-            // 使用标准 Java API 创建 Context，由于上面插入了 Provider，这里会优先使用 Conscrypt
-            val sslContext = javax.net.ssl.SSLContext.getInstance("TLS", "Conscrypt")
-            sslContext.init(null, null, null)
-            val trustManager = org.conscrypt.Conscrypt.getDefaultX509TrustManager()
-
-            // 修正：XHttp2 的全局 Client 设置应该使用 XHttp.getInstance().okHttpClientBuilder
-            val builder = com.xuexiang.xhttp2.XHttp.getInstance().okHttpClientBuilder
-            builder.sslSocketFactory(sslContext.socketFactory, trustManager)
-            builder.hostnameVerifier { _, _ -> true }
-            
-            Log.d(TAG, "Conscrypt TLS 1.3 引擎注入成功")
-        } catch (e: Exception) {
-            Log.e(TAG, "Conscrypt 注入异常: ${e.message}")
-        }
         
         // 初始化日志打印
         isDebug = SettingUtils.enableDebugMode
