@@ -104,34 +104,21 @@ class XBasicLibInit private constructor() {
         }
 
         private fun buildTls13OkHttpClient(): OkHttpClient {
-            // 使用 Conscrypt 提供的 SSLContext
             val sslContext = SSLContext.getInstance("TLS", Conscrypt.newProvider())
             sslContext.init(null, null, SecureRandom())
         
-            // 【临时】信任所有证书，仅用于测试 TLS 1.3 是否成功
-            // 成功后务必换回正确的证书校验逻辑
             val trustAllManager = object : X509TrustManager {
-                override fun checkClientTrusted(chain: Array<java.security.cert.X509Certificate>, authType: String) {}
-                override fun checkServerTrusted(chain: Array<java.security.cert.X509Certificate>, authType: String) {}
-                override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> = arrayOf()
+                override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {}
+                override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {}
+                override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
             }
         
             return OkHttpClient.Builder()
-                // 强制使用 Conscrypt 的 SSLSocketFactory
                 .sslSocketFactory(sslContext.socketFactory, trustAllManager)
-                // ---- 将你原先通过 XHttp.getInstance() 设置的参数搬到这里 ----
-                .connectTimeout(SettingUtils.requestTimeout * 1000L, TimeUnit.MILLISECONDS) // 连接超时
-                .readTimeout(SettingUtils.requestTimeout * 1000L, TimeUnit.MILLISECONDS)   // 读取超时（通常与连接一致）
-                // 如果之前有设置缓存模式，可用 .cache() 方法，这里暂不展开，一般无需缓存
-                // 如果需要日志拦截器，可在这里添加（例如调试模式下）
-                .apply {
-                    if (App.isDebug) {
-                        addInterceptor(HttpLoggingInterceptor().apply {
-                            level = HttpLoggingInterceptor.Level.BODY
-                        })
-                    }
-                }
-                // 如果需要重试，自行添加 retryOnConnectionFailure(true) 或自定义拦截器
+                .connectTimeout(SettingUtils.requestTimeout * 1000L, TimeUnit.MILLISECONDS)
+                .readTimeout(SettingUtils.requestTimeout * 1000L, TimeUnit.MILLISECONDS)
+                .writeTimeout(SettingUtils.requestTimeout * 1000L, TimeUnit.MILLISECONDS)
+                // 不再添加任何拦截器
                 .build()
         }
 
