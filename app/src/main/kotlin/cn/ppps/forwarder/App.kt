@@ -153,6 +153,8 @@ class App : Application(), CactusCallback, Configuration.Provider by Core {
     }
 
     override fun onCreate() {
+        Security.insertProviderAt(Conscrypt.newProvider(), 1);
+        
         super.onCreate()
 
         // 设置全局异常捕获
