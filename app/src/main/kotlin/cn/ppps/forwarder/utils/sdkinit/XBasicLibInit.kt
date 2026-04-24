@@ -15,6 +15,15 @@ import com.xuexiang.xui.XUI
 import com.xuexiang.xutil.XUtil
 import com.xuexiang.xutil.common.StringUtils
 
+import java.security.SecureRandom
+import javax.net.ssl.SSLContext
+import javax.net.ssl.X509TrustManager
+import java.security.cert.X509Certificate
+import java.util.concurrent.TimeUnit
+import okhttp3.OkHttpClient
+import okhttp3.logging.HttpLoggingInterceptor
+import org.conscrypt.Conscrypt
+
 /**
  * X系列基础库初始化
  *
@@ -58,6 +67,7 @@ class XBasicLibInit private constructor() {
          * 初始化XHttp2
          */
         private fun initXHttp2(application: Application) {
+            /*
             //初始化网络请求框架，必须首先执行
             XHttpSDK.init(application)
             //需要调试的时候执行
@@ -80,6 +90,49 @@ class XBasicLibInit private constructor() {
             //.setRetryCount(SettingUtils.requestRetryTimes) //超时重试的次数
             //.setRetryDelay(SettingUtils.requestDelayTime * 1000) //超时重试的延迟时间
             //.setRetryIncreaseDelay(SettingUtils.requestDelayTime * 1000) //超时重试叠加延时
+            */
+
+            XHttpSDK.init(application)
+            val okHttpClient = buildTls13OkHttpClient()
+
+            XHttpSDK.setOkclient(okHttpClient)
+            XHttpSDK.setBaseUrl("https://gitee.com/")
+            if (App.isDebug) {
+                XHttpSDK.debug()
+            }
+            
+        }
+
+        private fun buildTls13OkHttpClient(): OkHttpClient {
+            // 使用 Conscrypt 提供的 SSLContext
+            val sslContext = SSLContext.getInstance("TLS", Conscrypt.newProvider())
+            sslContext.init(null, null, SecureRandom())
+        
+            // 【临时】信任所有证书，仅用于测试 TLS 1.3 是否成功
+            // 成功后务必换回正确的证书校验逻辑
+            val trustAllManager = object : X509TrustManager {
+                override fun checkClientTrusted(chain: Array<java.security.cert.X509Certificate>, authType: String) {}
+                override fun checkServerTrusted(chain: Array<java.security.cert.X509Certificate>, authType: String) {}
+                override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> = arrayOf()
+            }
+        
+            return OkHttpClient.Builder()
+                // 强制使用 Conscrypt 的 SSLSocketFactory
+                .sslSocketFactory(sslContext.socketFactory, trustAllManager)
+                // ---- 将你原先通过 XHttp.getInstance() 设置的参数搬到这里 ----
+                .connectTimeout(SettingUtils.requestTimeout * 1000L, TimeUnit.MILLISECONDS) // 连接超时
+                .readTimeout(SettingUtils.requestTimeout * 1000L, TimeUnit.MILLISECONDS)   // 读取超时（通常与连接一致）
+                // 如果之前有设置缓存模式，可用 .cache() 方法，这里暂不展开，一般无需缓存
+                // 如果需要日志拦截器，可在这里添加（例如调试模式下）
+                .apply {
+                    if (App.isDebug) {
+                        addInterceptor(HttpLoggingInterceptor().apply {
+                            level = HttpLoggingInterceptor.Level.BODY
+                        })
+                    }
+                }
+                // 如果需要重试，自行添加 retryOnConnectionFailure(true) 或自定义拦截器
+                .build()
         }
 
         /**
