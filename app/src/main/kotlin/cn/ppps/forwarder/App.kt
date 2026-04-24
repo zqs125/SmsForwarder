@@ -77,6 +77,7 @@ import java.util.TimeZone
 import java.util.concurrent.TimeUnit
 import java.security.Security
 import org.conscrypt.Conscrypt
+import com.xuexiang.xhttp2.XHttp
 
 @Suppress("DEPRECATION")
 class App : Application(), CactusCallback, Configuration.Provider by Core {
@@ -335,21 +336,22 @@ class App : Application(), CactusCallback, Configuration.Provider by Core {
         XBasicLibInit.init(this)
 
         try {
-            // 创建 Conscrypt SSL 上下文
-            val sslContext = Conscrypt.newSSLContext()
+            // 使用 Conscrypt 提供的方法创建 SSLContext
+            val sslContext = org.conscrypt.Conscrypt.newExternalSSLContext("TLS", org.conscrypt.Conscrypt.getDefaultProvider())
             sslContext.init(null, null, null)
-            val trustManager = Conscrypt.getDefaultX509TrustManager()
+            val trustManager = org.conscrypt.Conscrypt.getDefaultX509TrustManager()
 
-            // 强制覆盖 XHttp 的单例配置
-            com.xuexiang.xhttp2.XHttp.getInstance().apply {
-                setSSLContext(sslContext) 
-                setSslSocketFactory(sslContext.socketFactory, trustManager)
-                // 解决旧设备根证书过旧导致的证书校验失败
-                setHostnameVerifier { _, _ -> true } 
-            }
-            Log.d(TAG, "Conscrypt TLS 1.3 引擎已正式注入 XHttp")
+            // XHttp 内部是通过这个单例维护 OkHttpClient 的
+            com.xuexiang.xhttp2.XHttp.getInstance().setOkHttpClient(
+                com.xuexiang.xhttp2.XHttp.getOkHttpClientBuilder()
+                    .sslSocketFactory(sslContext.socketFactory, trustManager)
+                    .hostnameVerifier { _, _ -> true }
+                    .build()
+            )
+            Log.d(TAG, "Conscrypt TLS 1.3 注入成功")
         } catch (e: Exception) {
             Log.e(TAG, "Conscrypt 注入异常: ${e.message}")
+            e.printStackTrace()
         }
         
         // 初始化日志打印
