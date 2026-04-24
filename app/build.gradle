@@ -276,6 +276,9 @@ tasks.withType(Test).configureEach {
 }
 
 dependencies {
+    //Conscrypt库
+    implementation 'org.conscrypt:conscrypt-android:2.5.2'
+    
     implementation fileTree(dir: 'libs', include: ['*.jar'])
     //frpc
     implementation files('libs/frpclib.aar')
