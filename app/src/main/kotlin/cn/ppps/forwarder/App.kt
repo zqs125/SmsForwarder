@@ -155,10 +155,9 @@ class App : Application(), CactusCallback, Configuration.Provider by Core {
     }
 
     override fun onCreate() {
-        Security.insertProviderAt(Conscrypt.newProvider(), 1);
-        
         super.onCreate()
 
+        Security.insertProviderAt(Conscrypt.newProvider(), 1)
         // 设置全局异常捕获
         val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
@@ -334,6 +333,25 @@ class App : Application(), CactusCallback, Configuration.Provider by Core {
         SharedPreference.init(applicationContext)
         // X系列基础库初始化
         XBasicLibInit.init(this)
+
+        try {
+            // 创建 Conscrypt SSL 上下文
+            val sslContext = Conscrypt.newSSLContext()
+            sslContext.init(null, null, null)
+            val trustManager = Conscrypt.getDefaultX509TrustManager()
+
+            // 强制覆盖 XHttp 的单例配置
+            com.xuexiang.xhttp2.XHttp.getInstance().apply {
+                setSSLContext(sslContext) 
+                setSslSocketFactory(sslContext.socketFactory, trustManager)
+                // 解决旧设备根证书过旧导致的证书校验失败
+                setHostnameVerifier { _, _ -> true } 
+            }
+            Log.d(TAG, "Conscrypt TLS 1.3 引擎已正式注入 XHttp")
+        } catch (e: Exception) {
+            Log.e(TAG, "Conscrypt 注入异常: ${e.message}")
+        }
+        
         // 初始化日志打印
         isDebug = SettingUtils.enableDebugMode
         Log.init(applicationContext)
