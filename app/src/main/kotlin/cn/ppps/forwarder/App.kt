@@ -336,22 +336,22 @@ class App : Application(), CactusCallback, Configuration.Provider by Core {
         XBasicLibInit.init(this)
 
         try {
-            // 使用 Conscrypt 提供的方法创建 SSLContext
-            val sslContext = org.conscrypt.Conscrypt.newExternalSSLContext("TLS", org.conscrypt.Conscrypt.getDefaultProvider())
+            // 全局插入 Conscrypt Provider
+            java.security.Security.insertProviderAt(org.conscrypt.Conscrypt.newProvider(), 1)
+
+            // 使用标准 Java API 创建 Context，由于上面插入了 Provider，这里会优先使用 Conscrypt
+            val sslContext = javax.net.ssl.SSLContext.getInstance("TLS", "Conscrypt")
             sslContext.init(null, null, null)
             val trustManager = org.conscrypt.Conscrypt.getDefaultX509TrustManager()
 
-            // XHttp 内部是通过这个单例维护 OkHttpClient 的
-            com.xuexiang.xhttp2.XHttp.getInstance().setOkHttpClient(
-                com.xuexiang.xhttp2.XHttp.getOkHttpClientBuilder()
-                    .sslSocketFactory(sslContext.socketFactory, trustManager)
-                    .hostnameVerifier { _, _ -> true }
-                    .build()
-            )
-            Log.d(TAG, "Conscrypt TLS 1.3 注入成功")
+            // 修正：XHttp2 的全局 Client 设置应该使用 XHttp.getInstance().okHttpClientBuilder
+            val builder = com.xuexiang.xhttp2.XHttp.getInstance().okHttpClientBuilder
+            builder.sslSocketFactory(sslContext.socketFactory, trustManager)
+            builder.hostnameVerifier { _, _ -> true }
+            
+            Log.d(TAG, "Conscrypt TLS 1.3 引擎注入成功")
         } catch (e: Exception) {
             Log.e(TAG, "Conscrypt 注入异常: ${e.message}")
-            e.printStackTrace()
         }
         
         // 初始化日志打印
