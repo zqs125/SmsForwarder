@@ -75,6 +75,8 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import java.util.concurrent.TimeUnit
+import java.security.Security
+import org.conscrypt.Conscrypt
 
 @Suppress("DEPRECATION")
 class App : Application(), CactusCallback, Configuration.Provider by Core {
