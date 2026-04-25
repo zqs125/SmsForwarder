@@ -15,7 +15,9 @@ import com.xuexiang.xui.XUI
 import com.xuexiang.xutil.XUtil
 import com.xuexiang.xutil.common.StringUtils
 
+import okhttp3.ConnectionSpec
 import okhttp3.OkHttpClient
+import okhttp3.TlsVersion
 import org.conscrypt.Conscrypt
 import java.security.KeyStore
 import java.security.Security
@@ -26,30 +28,35 @@ import javax.net.ssl.X509TrustManager
 
 object OkHttpTLS13Client {
 
-    // 使用 lazy 委托，只有在第一次访问 instance 时才会初始化
     val instance: OkHttpClient by lazy {
         createTLS13Client()
     }
 
     private fun createTLS13Client(): OkHttpClient {
-        // 1. 插入 Conscrypt 提供程序
-        // 注意：在 Android 中建议在 Application.onCreate 中初始化一次即可
-        if (Security.getProvider("Conscrypt") == null) {
-            Security.insertProviderAt(Conscrypt.newProvider(), 1)
-        }
+        try {
+            // 1. 强制将 Conscrypt 置于首位，确保替代系统内置的旧版 OpenSSL
+            val provider = Conscrypt.newProvider()
+            Security.insertProviderAt(provider, 1)
 
-        return try {
-            val sslContext = SSLContext.getInstance("TLSv1.3").apply {
+            // 2. 必须明确指定协议名为 "TLSv1.3"，但在 Android 4.4 上建议先由 Conscrypt 提供 Context
+            val sslContext = SSLContext.getInstance("TLSv1.3", provider).apply {
                 init(null, null, null)
             }
             
             val trustManager = getTrustManager()
 
-            OkHttpClient.Builder()
+            // 3. 强制 OkHttpClient 只允许 TLS 1.3 协议
+            val spec = ConnectionSpec.Builder(ConnectionSpec.MODERN_TLS)
+                .tlsVersions(TlsVersion.TLS_1_3)
+                .build()
+
+            return OkHttpClient.Builder()
                 .sslSocketFactory(sslContext.socketFactory, trustManager)
+                // 关键点：在 Android 4.4 上必须显式限制连接规格
+                .connectionSpecs(listOf(spec)) 
                 .build()
         } catch (e: Exception) {
-            throw RuntimeException("TLS 1.3 OkHttpClient 初始化失败", e)
+            throw RuntimeException("Android 4.4 TLS 1.3 启动失败: ${e.message}", e)
         }
     }
 
