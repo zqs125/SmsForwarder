@@ -15,18 +15,57 @@ import com.xuexiang.xui.XUI
 import com.xuexiang.xutil.XUtil
 import com.xuexiang.xutil.common.StringUtils
 
+import okhttp3.ConnectionSpec
+import okhttp3.TlsVersion
+
 import android.os.Build
 import android.util.Log
 import org.conscrypt.Conscrypt
+import java.io.IOException
+import java.net.InetAddress
+import java.net.Socket
 import java.security.KeyStore
 import java.security.SecureRandom
 import java.security.Security
 import javax.net.ssl.SSLContext
+import javax.net.ssl.SSLSocket
+import javax.net.ssl.SSLSocketFactory
 import javax.net.ssl.TrustManagerFactory
 import javax.net.ssl.X509TrustManager
 
-import okhttp3.ConnectionSpec
-import okhttp3.TlsVersion
+/**
+ * 强制启用 TLS 1.3 的套接字工厂包装器
+ */
+class Tls13EnforcingSocketFactory(private val delegate: SSLSocketFactory) : SSLSocketFactory() {
+
+    override fun getDefaultCipherSuites(): Array<String> = delegate.defaultCipherSuites
+    override fun getSupportedCipherSuites(): Array<String> = delegate.supportedCipherSuites
+
+    override fun createSocket(s: Socket?, host: String?, port: Int, autoClose: Boolean): Socket =
+        delegate.createSocket(s, host, port, autoClose).enforceTls13()
+
+    override fun createSocket(host: String?, port: Int): Socket =
+        delegate.createSocket(host, port).enforceTls13()
+
+    override fun createSocket(host: String?, port: Int, localHost: InetAddress?, localPort: Int): Socket =
+        delegate.createSocket(host, port, localHost, localPort).enforceTls13()
+
+    override fun createSocket(host: InetAddress?, port: Int): Socket =
+        delegate.createSocket(host, port).enforceTls13()
+
+    override fun createSocket(host: InetAddress?, port: Int, localHost: InetAddress?, localPort: Int): Socket =
+        delegate.createSocket(host, port, localHost, localPort).enforceTls13()
+
+    private fun Socket.enforceTls13(): Socket {
+        if (this is SSLSocket) {
+            val current = enabledProtocols ?: emptyArray()
+            if (!current.contains("TLSv1.3")) {
+                enabledProtocols = current + "TLSv1.3"
+            }
+        }
+        return this
+    }
+}
 
 /**
  * X系列基础库初始化
@@ -96,7 +135,7 @@ class XBasicLibInit private constructor() {
 
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
                 installConscrypt()
-                forceTls13OnOkHttp()
+                //forceTls13OnOkHttp()
             }
         }
 
@@ -104,19 +143,18 @@ class XBasicLibInit private constructor() {
             try {
                 val provider = Conscrypt.newProvider()
                 Security.insertProviderAt(provider, 1)
-                
+        
                 val sslContext = SSLContext.getInstance("TLS", provider)
-                val trustManager = getDefaultTrustManager()
-                sslContext.init(null, arrayOf<X509TrustManager>(trustManager), SecureRandom())
-                val factory = sslContext.socketFactory
-                
-                XHttp.getOkHttpClientBuilder().sslSocketFactory(factory, trustManager)
-                
-                // 诊断日志
-                Log.i("XHttp", "Conscrypt installed. SSLFactory: ${factory.javaClass.name}")
-                Log.i("XHttp", "Provider at pos 1: ${Security.getProviders()[1].name}")
+                val tm = getDefaultTrustManager()
+                sslContext.init(null, arrayOf<X509TrustManager>(tm), SecureRandom())
+        
+                // 用自定义工厂强制启用 TLS 1.3
+                val wrappedFactory = Tls13EnforcingSocketFactory(sslContext.socketFactory)
+                XHttp.getOkHttpClientBuilder().sslSocketFactory(wrappedFactory, tm)
+        
+                Log.i("XHttp", "Conscrypt + TLS 1.3 enforcer installed")
             } catch (e: Exception) {
-                Log.e("XHttp", "Failed to install Conscrypt", e)
+                Log.e("XHttp", "Conscrypt failed", e)
             }
         }
 
