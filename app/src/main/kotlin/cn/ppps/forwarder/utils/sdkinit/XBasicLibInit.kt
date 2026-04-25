@@ -31,6 +31,7 @@ import java.net.Socket
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
 
+import android.util.Log
 
 /**
  * 强制所有连接只使用 TLS 1.3 的 SocketFactory
@@ -54,6 +55,9 @@ class Tls13OnlySocketFactory(private val delegate: SSLSocketFactory) : SSLSocket
     override fun createSocket(host: InetAddress, port: Int): Socket = enableTls13(delegate.createSocket(host, port))
     override fun createSocket(address: InetAddress, port: Int, localAddress: InetAddress, localPort: Int): Socket =
         enableTls13(delegate.createSocket(address, port, localAddress, localPort))
+    // 关键：必须实现的 Android 扩展方法
+    override fun createSocket(s: Socket, host: String, port: Int, autoClose: Boolean): Socket =
+        enableTls13(delegate.createSocket(s, host, port, autoClose))
 }
 
 
@@ -147,8 +151,7 @@ class XBasicLibInit private constructor() {
         private fun buildTls13OkHttpClient(): OkHttpClient {
             val sslContext = SSLContext.getInstance("TLS", Conscrypt.newProvider())
             sslContext.init(null, null, SecureRandom())
-            
-            // 用 Tls13OnlySocketFactory 强制启用 TLS 1.3
+        
             val tls13Factory = Tls13OnlySocketFactory(sslContext.socketFactory)
         
             val trustAllManager = object : X509TrustManager {
@@ -158,11 +161,13 @@ class XBasicLibInit private constructor() {
             }
         
             return OkHttpClient.Builder()
-                .sslSocketFactory(tls13Factory, trustAllManager)   // 不再需要 ConnectionSpec
+                .sslSocketFactory(tls13Factory, trustAllManager)
                 .addInterceptor { chain ->
                     val response = chain.proceed(chain.request())
-                    val handshake = response.handshake
-                    Log.d("TLS", "协议版本: ${handshake?.tlsVersion}, 加密套件: ${handshake?.cipherSuite}")
+                    val handshake = response.handshake()          // 方法调用
+                    val tlsVersion = handshake?.tlsVersion()?.javaName()
+                    val cipher = handshake?.cipherSuite()?.javaName()
+                    Log.d("TlsTest", "协议: $tlsVersion, 加密套件: $cipher")
                     response
                 }
                 .connectTimeout(SettingUtils.requestTimeout * 1000L, TimeUnit.MILLISECONDS)
