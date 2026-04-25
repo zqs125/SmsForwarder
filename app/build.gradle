@@ -279,7 +279,7 @@ dependencies {
     implementation 'com.squareup.okhttp3:okhttp:3.12.13'
     
     //Conscrypt库
-    implementation 'org.conscrypt:conscrypt-android:2.5.2'
+    implementation 'org.conscrypt:conscrypt-android:2.2.1'
     
     implementation fileTree(dir: 'libs', include: ['*.jar'])
     //frpc
