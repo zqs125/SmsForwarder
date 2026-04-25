@@ -15,10 +15,39 @@ import com.xuexiang.xui.XUI
 import com.xuexiang.xutil.XUtil
 import com.xuexiang.xutil.common.StringUtils
 
-import org.conscrypt.Conscrypt
-import java.security.Security
-import javax.net.ssl.X509TrustManager
-import okhttp3.OkHttpClient
+import okhttp3.OkHttpClient;
+import org.conscrypt.Conscrypt;
+ 
+import javax.net.ssl.SSLSocketFactory;
+import javax.net.ssl.X509TrustManager;
+import java.security.Security;
+
+
+public class OkHttpTLS13 {
+    public static OkHttpClient getTLS13Client() {
+        Security.insertProviderAt(Conscrypt.newProvider(), 1);
+ 
+        try {
+            // 创建 TLS 1.3 的 SSLSocketFactory
+            SSLContext sslContext = SSLContext.getInstance("TLSv1.3");
+            sslContext.init(null, null, null);
+            SSLSocketFactory sslSocketFactory = sslContext.getSocketFactory();
+ 
+            return new OkHttpClient.Builder()
+                    .sslSocketFactory(sslSocketFactory, (X509TrustManager) getTrustManager())
+                    .build();
+        } catch (Exception e) {
+            throw new RuntimeException("TLS 1.3 初始化失败", e);
+        }
+    }
+ 
+    private static TrustManager getTrustManager() throws Exception {
+        TrustManagerFactory trustManagerFactory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+        trustManagerFactory.init((KeyStore) null);
+        return trustManagerFactory.getTrustManagers()[0];
+    }
+}
+
 
 /**
  * X系列基础库初始化
@@ -63,7 +92,6 @@ class XBasicLibInit private constructor() {
          * 初始化XHttp2
          */
         private fun initXHttp2(application: Application) {
-            Security.insertProviderAt(Conscrypt.newProvider(), 1)
             
             //初始化网络请求框架，必须首先执行
             XHttpSDK.init(application)
@@ -80,15 +108,12 @@ class XBasicLibInit private constructor() {
             //请求失效校验拦截器
             //XHttpSDK.addInterceptor(CustomExpiredInterceptor())
 
-            val trustManager = Conscrypt.getDefaultX509TrustManager() as X509TrustManager
-            val okHttpClient = OkHttpClient.Builder()
-                .sslSocketFactory(Conscrypt.newProvider().getSocketFactory(), trustManager)
-                .build()
+            OkHttpClient ok_client = OkHttpTLS13.getTLS13Client()
             
             //设置全局超时时间
             XHttp.getInstance()
                 .debug(App.isDebug)
-                .setOkclient(okHttpClient)
+                .setOkclient(ok_client)
                 .setCacheMode(CacheMode.NO_CACHE)
                 .setTimeout(SettingUtils.requestTimeout * 1000L) //单次超时时间
             //.setRetryCount(SettingUtils.requestRetryTimes) //超时重试的次数
