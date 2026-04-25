@@ -158,7 +158,7 @@ class App : Application(), CactusCallback, Configuration.Provider by Core {
     override fun onCreate() {
         super.onCreate()
 
-        Security.insertProviderAt(Conscrypt.newProvider(), 1)
+        //Security.insertProviderAt(Conscrypt.newProvider(), 1)
         // 设置全局异常捕获
         val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
