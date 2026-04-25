@@ -26,6 +26,37 @@ import org.conscrypt.Conscrypt
 import okhttp3.ConnectionSpec
 import okhttp3.TlsVersion
 
+import java.net.InetAddress
+import java.net.Socket
+import javax.net.ssl.SSLSocket
+import javax.net.ssl.SSLSocketFactory
+
+
+/**
+ * 强制所有连接只使用 TLS 1.3 的 SocketFactory
+ */
+class Tls13OnlySocketFactory(private val delegate: SSLSocketFactory) : SSLSocketFactory() {
+
+    override fun getDefaultCipherSuites(): Array<String> = delegate.defaultCipherSuites
+    override fun getSupportedCipherSuites(): Array<String> = delegate.supportedCipherSuites
+
+    private fun enableTls13(socket: Socket): Socket {
+        if (socket is SSLSocket) {
+            socket.enabledProtocols = arrayOf("TLSv1.3")
+        }
+        return socket
+    }
+
+    override fun createSocket(): Socket = enableTls13(delegate.createSocket())
+    override fun createSocket(host: String, port: Int): Socket = enableTls13(delegate.createSocket(host, port))
+    override fun createSocket(host: String, port: Int, localHost: InetAddress, localPort: Int): Socket =
+        enableTls13(delegate.createSocket(host, port, localHost, localPort))
+    override fun createSocket(host: InetAddress, port: Int): Socket = enableTls13(delegate.createSocket(host, port))
+    override fun createSocket(address: InetAddress, port: Int, localAddress: InetAddress, localPort: Int): Socket =
+        enableTls13(delegate.createSocket(address, port, localAddress, localPort))
+}
+
+
 /**
  * X系列基础库初始化
  *
@@ -114,26 +145,26 @@ class XBasicLibInit private constructor() {
         }
 
         private fun buildTls13OkHttpClient(): OkHttpClient {
-            // 使用 Conscrypt 提供的 SSLContext
             val sslContext = SSLContext.getInstance("TLS", Conscrypt.newProvider())
             sslContext.init(null, null, SecureRandom())
+            
+            // 用 Tls13OnlySocketFactory 强制启用 TLS 1.3
+            val tls13Factory = Tls13OnlySocketFactory(sslContext.socketFactory)
         
-            // 临时信任所有证书（仅用于测试）
             val trustAllManager = object : X509TrustManager {
                 override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {}
                 override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {}
                 override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
             }
         
-            // 强制 OkHttp 只使用 TLS 1.3（兼容 OkHttp 3.x，用字符串方式）
-            val tls13Spec = ConnectionSpec.Builder(ConnectionSpec.MODERN_TLS)
-                .tlsVersions(okhttp3.TlsVersion.forJavaName("TLSv1.3"))
-                .allEnabledCipherSuites()
-                .build()
-        
             return OkHttpClient.Builder()
-                .sslSocketFactory(sslContext.socketFactory, trustAllManager)
-                .connectionSpecs(listOf(tls13Spec))
+                .sslSocketFactory(tls13Factory, trustAllManager)   // 不再需要 ConnectionSpec
+                .addInterceptor { chain ->
+                    val response = chain.proceed(chain.request())
+                    val handshake = response.handshake
+                    Log.d("TLS", "协议版本: ${handshake?.tlsVersion}, 加密套件: ${handshake?.cipherSuite}")
+                    response
+                }
                 .connectTimeout(SettingUtils.requestTimeout * 1000L, TimeUnit.MILLISECONDS)
                 .readTimeout(SettingUtils.requestTimeout * 1000L, TimeUnit.MILLISECONDS)
                 .writeTimeout(SettingUtils.requestTimeout * 1000L, TimeUnit.MILLISECONDS)
