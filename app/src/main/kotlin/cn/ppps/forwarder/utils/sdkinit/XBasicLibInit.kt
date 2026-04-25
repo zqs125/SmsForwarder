@@ -23,6 +23,9 @@ import java.security.cert.X509Certificate
 import java.util.concurrent.TimeUnit
 import org.conscrypt.Conscrypt
 
+import okhttp3.ConnectionSpec
+import okhttp3.TlsVersion
+
 /**
  * X系列基础库初始化
  *
@@ -111,23 +114,29 @@ class XBasicLibInit private constructor() {
         }
 
         private fun buildTls13OkHttpClient(): OkHttpClient {
-            // 使用 Conscrypt 提供的 SSLContext
-            val sslContext = SSLContext.getInstance("TLS", Conscrypt.newProvider())
-            sslContext.init(null, null, SecureRandom())
+            // 获取 Conscrypt 推荐的 SSLSocketFactory（自动启用 TLS 1.3）
+            val sslSocketFactory = Conscrypt.newPreferredSSLContextSslSocketFactory()
+                ?: throw IllegalStateException("Conscrypt 不可用，无法创建 SSLSocketFactory")
         
-            // 信任所有证书（仅用于测试 TLS 1.3 是否成功，正式环境请替换为正确证书校验）
+            // 临时信任所有证书（仅用于验证，成功后请替换为正确校验）
             val trustAllManager = object : X509TrustManager {
                 override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {}
                 override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {}
                 override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
             }
         
+            // 创建只包含 TLS 1.3 的连接规范（注：OkHttp 4.x 枚举名称为 TLS_V13）
+            val tls13Spec = ConnectionSpec.Builder(ConnectionSpec.COMPATIBLE_TLS)
+                .tlsVersions(TlsVersion.TLS_1_3)   // 强制只允许 TLS 1.3
+                .allEnabledCipherSuites()         // 允许所有密码套件
+                .build()
+        
             return OkHttpClient.Builder()
-                .sslSocketFactory(sslContext.socketFactory, trustAllManager)
+                .sslSocketFactory(sslSocketFactory, trustAllManager)
+                .connectionSpecs(listOf(tls13Spec))   // 限制只能使用 TLS 1.3
                 .connectTimeout(SettingUtils.requestTimeout * 1000L, TimeUnit.MILLISECONDS)
                 .readTimeout(SettingUtils.requestTimeout * 1000L, TimeUnit.MILLISECONDS)
                 .writeTimeout(SettingUtils.requestTimeout * 1000L, TimeUnit.MILLISECONDS)
-                // 不添加任何日志拦截器，保持简洁
                 .build()
         }
 
