@@ -15,36 +15,49 @@ import com.xuexiang.xui.XUI
 import com.xuexiang.xutil.XUtil
 import com.xuexiang.xutil.common.StringUtils
 
-import okhttp3.OkHttpClient;
-import org.conscrypt.Conscrypt;
- 
-import javax.net.ssl.SSLSocketFactory;
-import javax.net.ssl.X509TrustManager;
-import java.security.Security;
+import okhttp3.OkHttpClient
+import org.conscrypt.Conscrypt
+import java.security.KeyStore
+import java.security.Security
+import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManagerFactory
+import javax.net.ssl.X509TrustManager
 
 
-public class OkHttpTLS13 {
-    public static OkHttpClient getTLS13Client() {
-        Security.insertProviderAt(Conscrypt.newProvider(), 1);
- 
-        try {
-            // 创建 TLS 1.3 的 SSLSocketFactory
-            SSLContext sslContext = SSLContext.getInstance("TLSv1.3");
-            sslContext.init(null, null, null);
-            SSLSocketFactory sslSocketFactory = sslContext.getSocketFactory();
- 
-            return new OkHttpClient.Builder()
-                    .sslSocketFactory(sslSocketFactory, (X509TrustManager) getTrustManager())
-                    .build();
-        } catch (Exception e) {
-            throw new RuntimeException("TLS 1.3 初始化失败", e);
+object OkHttpTLS13Client {
+
+    // 使用 lazy 委托，只有在第一次访问 instance 时才会初始化
+    val instance: OkHttpClient by lazy {
+        createTLS13Client()
+    }
+
+    private fun createTLS13Client(): OkHttpClient {
+        // 1. 插入 Conscrypt 提供程序
+        // 注意：在 Android 中建议在 Application.onCreate 中初始化一次即可
+        if (Security.getProvider("Conscrypt") == null) {
+            Security.insertProviderAt(Conscrypt.newProvider(), 1)
+        }
+
+        return try {
+            val sslContext = SSLContext.getInstance("TLSv1.3").apply {
+                init(null, null, null)
+            }
+            
+            val trustManager = getTrustManager()
+
+            OkHttpClient.Builder()
+                .sslSocketFactory(sslContext.socketFactory, trustManager)
+                .build()
+        } catch (e: Exception) {
+            throw RuntimeException("TLS 1.3 OkHttpClient 初始化失败", e)
         }
     }
- 
-    private static TrustManager getTrustManager() throws Exception {
-        TrustManagerFactory trustManagerFactory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
-        trustManagerFactory.init((KeyStore) null);
-        return trustManagerFactory.getTrustManagers()[0];
+
+    private fun getTrustManager(): X509TrustManager {
+        val factory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm()).apply {
+            init(null as KeyStore?)
+        }
+        return factory.trustManagers[0] as X509TrustManager
     }
 }
 
@@ -108,12 +121,12 @@ class XBasicLibInit private constructor() {
             //请求失效校验拦截器
             //XHttpSDK.addInterceptor(CustomExpiredInterceptor())
 
-            OkHttpClient ok_client = OkHttpTLS13.getTLS13Client()
+            
             
             //设置全局超时时间
             XHttp.getInstance()
                 .debug(App.isDebug)
-                .setOkclient(ok_client)
+                .setOkclient(OkHttpTLS13Client.instance)
                 .setCacheMode(CacheMode.NO_CACHE)
                 .setTimeout(SettingUtils.requestTimeout * 1000L) //单次超时时间
             //.setRetryCount(SettingUtils.requestRetryTimes) //超时重试的次数
