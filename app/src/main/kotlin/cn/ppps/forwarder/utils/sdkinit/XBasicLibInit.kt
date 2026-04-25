@@ -28,6 +28,7 @@ import java.security.KeyStore
 import java.security.SecureRandom
 import java.security.Security
 import javax.net.ssl.SSLContext
+import javax.net.ssl.SSLParameters
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
 import javax.net.ssl.TrustManagerFactory
@@ -41,26 +42,56 @@ class Tls13EnforcingSocketFactory(private val delegate: SSLSocketFactory) : SSLS
     override fun getDefaultCipherSuites(): Array<String> = delegate.defaultCipherSuites
     override fun getSupportedCipherSuites(): Array<String> = delegate.supportedCipherSuites
 
-    override fun createSocket(s: Socket?, host: String?, port: Int, autoClose: Boolean): Socket =
-        delegate.createSocket(s, host, port, autoClose).enforceTls13()
+    override fun createSocket(s: Socket?, host: String?, port: Int, autoClose: Boolean): Socket {
+        Log.d("TlsEnforcer", "createSocket(1) $host:$port")
+        return delegate.createSocket(s, host, port, autoClose).enforceTls13()
+    }
 
-    override fun createSocket(host: String?, port: Int): Socket =
-        delegate.createSocket(host, port).enforceTls13()
+    override fun createSocket(host: String?, port: Int): Socket {
+        Log.d("TlsEnforcer", "createSocket(2) $host:$port")
+        return delegate.createSocket(host, port).enforceTls13()
+    }
 
-    override fun createSocket(host: String?, port: Int, localHost: InetAddress?, localPort: Int): Socket =
-        delegate.createSocket(host, port, localHost, localPort).enforceTls13()
+    override fun createSocket(host: String?, port: Int, localHost: InetAddress?, localPort: Int): Socket {
+        Log.d("TlsEnforcer", "createSocket(3) $host:$port")
+        return delegate.createSocket(host, port, localHost, localPort).enforceTls13()
+    }
 
-    override fun createSocket(host: InetAddress?, port: Int): Socket =
-        delegate.createSocket(host, port).enforceTls13()
+    override fun createSocket(host: InetAddress?, port: Int): Socket {
+        Log.d("TlsEnforcer", "createSocket(4) $host:$port")
+        return delegate.createSocket(host, port).enforceTls13()
+    }
 
-    override fun createSocket(host: InetAddress?, port: Int, localHost: InetAddress?, localPort: Int): Socket =
-        delegate.createSocket(host, port, localHost, localPort).enforceTls13()
+    override fun createSocket(host: InetAddress?, port: Int, localHost: InetAddress?, localPort: Int): Socket {
+        Log.d("TlsEnforcer", "createSocket(5) $host:$port")
+        return delegate.createSocket(host, port, localHost, localPort).enforceTls13()
+    }
 
     private fun Socket.enforceTls13(): Socket {
         if (this is SSLSocket) {
+            try {
+                val params = sslParameters
+                Conscrypt.setMaxTlsVersion(params, "TLSv1.3")
+                sslParameters = params
+                Log.d("TlsEnforcer", "MaxTlsVersion set to TLSv1.3")
+            } catch (e: Exception) {
+                Log.w("TlsEnforcer", "setMaxTlsVersion failed", e)
+                // Fallback: try reflection
+                try {
+                    val method = Class.forName("org.conscrypt.Conscrypt")
+                        .getMethod("setMaxTlsVersion", SSLParameters::class.java, String::class.java)
+                    method.invoke(null, sslParameters, "TLSv1.3")
+                    sslParameters = sslParameters
+                    Log.d("TlsEnforcer", "MaxTlsVersion set via reflection")
+                } catch (e2: Exception) {
+                    Log.w("TlsEnforcer", "Reflection also failed", e2)
+                }
+            }
+
             val current = enabledProtocols ?: emptyArray()
             if (!current.contains("TLSv1.3")) {
                 enabledProtocols = current + "TLSv1.3"
+                Log.d("TlsEnforcer", "Enabled protocols: ${enabledProtocols.joinToString()}")
             }
         }
         return this
@@ -134,27 +165,35 @@ class XBasicLibInit private constructor() {
             //.setRetryIncreaseDelay(SettingUtils.requestDelayTime * 1000) //超时重试叠加延时
 
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                Log.e("XHttp", "API level: ${Build.VERSION.SDK_INT}, installing Conscrypt")
                 installConscrypt()
-                //forceTls13OnOkHttp()
+            } else {
+                Log.e("XHttp", "API level: ${Build.VERSION.SDK_INT}, skip Conscrypt")
             }
+        
+            // 强制触发 OkHttpClient 创建，确保使用最新配置
+            try {
+                XHttp.getOkHttpClient()
+            } catch (_: Exception) {}
         }
 
         private fun installConscrypt() {
+            Log.e("XHttp", "installConscrypt() start")
             try {
                 val provider = Conscrypt.newProvider()
-                Security.insertProviderAt(provider, 1)
+                val pos = Security.insertProviderAt(provider, 1)
+                Log.e("XHttp", "Provider inserted at $pos: ${provider.name}")
         
                 val sslContext = SSLContext.getInstance("TLS", provider)
                 val tm = getDefaultTrustManager()
                 sslContext.init(null, arrayOf<X509TrustManager>(tm), SecureRandom())
         
-                // 用自定义工厂强制启用 TLS 1.3
                 val wrappedFactory = Tls13EnforcingSocketFactory(sslContext.socketFactory)
                 XHttp.getOkHttpClientBuilder().sslSocketFactory(wrappedFactory, tm)
         
-                Log.i("XHttp", "Conscrypt + TLS 1.3 enforcer installed")
+                Log.e("XHttp", "TLS 1.3 enforcing factory installed")
             } catch (e: Exception) {
-                Log.e("XHttp", "Conscrypt failed", e)
+                Log.e("XHttp", "Conscrypt setup failed", e)
             }
         }
 
