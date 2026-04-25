@@ -15,13 +15,12 @@ import com.xuexiang.xui.XUI
 import com.xuexiang.xutil.XUtil
 import com.xuexiang.xutil.common.StringUtils
 
+import okhttp3.OkHttpClient
 import java.security.SecureRandom
 import javax.net.ssl.SSLContext
 import javax.net.ssl.X509TrustManager
 import java.security.cert.X509Certificate
 import java.util.concurrent.TimeUnit
-import okhttp3.OkHttpClient
-import okhttp3.logging.HttpLoggingInterceptor
 import org.conscrypt.Conscrypt
 
 /**
@@ -92,11 +91,19 @@ class XBasicLibInit private constructor() {
             //.setRetryIncreaseDelay(SettingUtils.requestDelayTime * 1000) //超时重试叠加延时
             */
 
+            // 1. 必须首先执行
             XHttpSDK.init(application)
+        
+            // 2. 构建支持 TLS 1.3 的自定义 OkHttpClient
             val okHttpClient = buildTls13OkHttpClient()
-
-            XHttpSDK.setOkclient(okHttpClient)
+        
+            // 3. 注入到 XHttp2 中（注意是 XHttp 的实例方法）
+            XHttp.getInstance().setOkclient(okHttpClient)
+        
+            // 4. 设置全局 BaseUrl
             XHttpSDK.setBaseUrl("https://gitee.com/")
+        
+            // 5. 调试开关
             if (App.isDebug) {
                 XHttpSDK.debug()
             }
@@ -104,9 +111,11 @@ class XBasicLibInit private constructor() {
         }
 
         private fun buildTls13OkHttpClient(): OkHttpClient {
+            // 使用 Conscrypt 提供的 SSLContext
             val sslContext = SSLContext.getInstance("TLS", Conscrypt.newProvider())
             sslContext.init(null, null, SecureRandom())
         
+            // 信任所有证书（仅用于测试 TLS 1.3 是否成功，正式环境请替换为正确证书校验）
             val trustAllManager = object : X509TrustManager {
                 override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {}
                 override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {}
@@ -118,7 +127,7 @@ class XBasicLibInit private constructor() {
                 .connectTimeout(SettingUtils.requestTimeout * 1000L, TimeUnit.MILLISECONDS)
                 .readTimeout(SettingUtils.requestTimeout * 1000L, TimeUnit.MILLISECONDS)
                 .writeTimeout(SettingUtils.requestTimeout * 1000L, TimeUnit.MILLISECONDS)
-                // 不再添加任何拦截器
+                // 不添加任何日志拦截器，保持简洁
                 .build()
         }
 
