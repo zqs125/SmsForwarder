@@ -69,25 +69,23 @@ class Tls13EnforcingSocketFactory(private val delegate: SSLSocketFactory) : SSLS
 
     private fun Socket.enforceTls13(): Socket {
         if (this is SSLSocket) {
+            // 反射设置最高 TLS 版本为 1.3
             try {
                 val params = sslParameters
-                Conscrypt.setMaxTlsVersion(params, "TLSv1.3")
+                val conscryptClass = Class.forName("org.conscrypt.Conscrypt")
+                val setMaxMethod = conscryptClass.getMethod(
+                    "setMaxTlsVersion",
+                    SSLParameters::class.java,
+                    String::class.java
+                )
+                setMaxMethod.invoke(null, params, "TLSv1.3")
                 sslParameters = params
-                Log.d("TlsEnforcer", "MaxTlsVersion set to TLSv1.3")
+                Log.d("TlsEnforcer", "MaxTlsVersion set to TLSv1.3 via reflection")
             } catch (e: Exception) {
-                Log.w("TlsEnforcer", "setMaxTlsVersion failed", e)
-                // Fallback: try reflection
-                try {
-                    val method = Class.forName("org.conscrypt.Conscrypt")
-                        .getMethod("setMaxTlsVersion", SSLParameters::class.java, String::class.java)
-                    method.invoke(null, sslParameters, "TLSv1.3")
-                    sslParameters = sslParameters
-                    Log.d("TlsEnforcer", "MaxTlsVersion set via reflection")
-                } catch (e2: Exception) {
-                    Log.w("TlsEnforcer", "Reflection also failed", e2)
-                }
+                Log.w("TlsEnforcer", "Failed to set MaxTlsVersion", e)
             }
 
+            // 确保 TLSv1.3 在启用协议列表中
             val current = enabledProtocols ?: emptyArray()
             if (!current.contains("TLSv1.3")) {
                 enabledProtocols = current + "TLSv1.3"
@@ -171,10 +169,8 @@ class XBasicLibInit private constructor() {
                 Log.e("XHttp", "API level: ${Build.VERSION.SDK_INT}, skip Conscrypt")
             }
         
-            // 强制触发 OkHttpClient 创建，确保使用最新配置
-            try {
-                XHttp.getOkHttpClient()
-            } catch (_: Exception) {}
+            // 强制创建 OkHttpClient，确保使用新配置
+            try { XHttp.getOkHttpClient() } catch (_: Exception) {}
         }
 
         private fun installConscrypt() {
