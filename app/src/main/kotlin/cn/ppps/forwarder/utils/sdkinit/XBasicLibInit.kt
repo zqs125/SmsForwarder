@@ -25,6 +25,9 @@ import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManagerFactory
 import javax.net.ssl.X509TrustManager
 
+import okhttp3.ConnectionSpec
+import okhttp3.TlsVersion
+
 /**
  * X系列基础库初始化
  *
@@ -93,6 +96,7 @@ class XBasicLibInit private constructor() {
 
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
                 installConscrypt()
+                forceTls13OnOkHttp()
             }
         }
 
@@ -100,18 +104,29 @@ class XBasicLibInit private constructor() {
             try {
                 val provider = Conscrypt.newProvider()
                 Security.insertProviderAt(provider, 1)
-        
+                
                 val sslContext = SSLContext.getInstance("TLS", provider)
                 val trustManager = getDefaultTrustManager()
                 sslContext.init(null, arrayOf<X509TrustManager>(trustManager), SecureRandom())
-        
-                XHttp.getOkHttpClientBuilder().sslSocketFactory(
-                    sslContext.socketFactory,
-                    trustManager
-                )
+                val factory = sslContext.socketFactory
+                
+                XHttp.getOkHttpClientBuilder().sslSocketFactory(factory, trustManager)
+                
+                // 诊断日志
+                Log.i("XHttp", "Conscrypt installed. SSLFactory: ${factory.javaClass.name}")
+                Log.i("XHttp", "Provider at pos 1: ${Security.getProviders()[1].name}")
             } catch (e: Exception) {
                 Log.e("XHttp", "Failed to install Conscrypt", e)
             }
+        }
+
+        private fun forceTls13OnOkHttp() {
+            val spec = ConnectionSpec.Builder(ConnectionSpec.MODERN_TLS)
+                .tlsVersions(TlsVersion.TLS_1_3, TlsVersion.TLS_1_2)  // 优先 TLS 1.3，兼容 1.2
+                .allEnabledCipherSuites()  // 允许所有密码套件，避免套件不匹配
+                .build()
+            
+            XHttp.getOkHttpClientBuilder().connectionSpecs(listOf(spec))
         }
         
         private fun getDefaultTrustManager(): X509TrustManager {
