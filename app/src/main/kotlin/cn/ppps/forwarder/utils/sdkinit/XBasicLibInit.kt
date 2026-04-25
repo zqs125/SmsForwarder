@@ -15,18 +15,10 @@ import com.xuexiang.xui.XUI
 import com.xuexiang.xutil.XUtil
 import com.xuexiang.xutil.common.StringUtils
 
-import okhttp3.ConnectionSpec
-import okhttp3.TlsVersion
-
-import android.os.Build
-import android.util.Log
 import org.conscrypt.Conscrypt
-import java.security.KeyStore
-import java.security.SecureRandom
 import java.security.Security
-import javax.net.ssl.SSLContext
-import javax.net.ssl.TrustManagerFactory
 import javax.net.ssl.X509TrustManager
+import okhttp3.OkHttpClient
 
 /**
  * X系列基础库初始化
@@ -71,6 +63,8 @@ class XBasicLibInit private constructor() {
          * 初始化XHttp2
          */
         private fun initXHttp2(application: Application) {
+            Security.insertProviderAt(Conscrypt.newProvider(), 1)
+            
             //初始化网络请求框架，必须首先执行
             XHttpSDK.init(application)
             //需要调试的时候执行
@@ -85,46 +79,21 @@ class XBasicLibInit private constructor() {
             //XHttpSDK.addInterceptor(CustomDynamicInterceptor())
             //请求失效校验拦截器
             //XHttpSDK.addInterceptor(CustomExpiredInterceptor())
+
+            val trustManager = Conscrypt.getDefaultX509TrustManager() as X509TrustManager
+            val okHttpClient = OkHttpClient.Builder()
+                .sslSocketFactory(Conscrypt.newProvider().getSocketFactory(), trustManager)
+                .build()
+            
             //设置全局超时时间
             XHttp.getInstance()
                 .debug(App.isDebug)
+                .setOkclient(okHttpClient)
                 .setCacheMode(CacheMode.NO_CACHE)
                 .setTimeout(SettingUtils.requestTimeout * 1000L) //单次超时时间
             //.setRetryCount(SettingUtils.requestRetryTimes) //超时重试的次数
             //.setRetryDelay(SettingUtils.requestDelayTime * 1000) //超时重试的延迟时间
             //.setRetryIncreaseDelay(SettingUtils.requestDelayTime * 1000) //超时重试叠加延时
-
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-                Log.e("XHttp", "API level: ${Build.VERSION.SDK_INT}, installing Conscrypt")
-                installConscrypt()
-            }
-        }
-
-        private fun installConscrypt() {
-            try {
-                // 1. 通过系统属性告知 Conscrypt 允许 TLS 1.3
-                System.setProperty("org.conscrypt.maxTlsVersion", "TLSv1.3")
-        
-                // 2. 注册 Conscrypt 为最高优先级安全提供者
-                val provider = Conscrypt.newProvider()
-                Security.insertProviderAt(provider, 1)
-        
-                // 3. 创建 Conscrypt 的 SSLContext 并设为默认
-                val sslContext = SSLContext.getInstance("TLS", provider)
-                sslContext.init(null, arrayOf(getDefaultTrustManager()), SecureRandom())
-                SSLContext.setDefault(sslContext)
-        
-                Log.e("XHttp", "Conscrypt default SSLContext installed, maxTlsVersion=TLSv1.3")
-            } catch (e: Exception) {
-                Log.e("XHttp", "Conscrypt install failed", e)
-            }
-        }
-        
-        private fun getDefaultTrustManager(): X509TrustManager {
-            val tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
-            tmf.init(null as KeyStore?)
-            @Suppress("UNCHECKED_CAST")
-            return tmf.trustManagers.first { it is X509TrustManager } as X509TrustManager
         }
 
         /**
