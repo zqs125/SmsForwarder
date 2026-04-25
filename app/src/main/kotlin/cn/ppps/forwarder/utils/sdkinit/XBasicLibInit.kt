@@ -15,51 +15,7 @@ import com.xuexiang.xui.XUI
 import com.xuexiang.xutil.XUtil
 import com.xuexiang.xutil.common.StringUtils
 
-import okhttp3.OkHttpClient
-import java.security.SecureRandom
-import javax.net.ssl.SSLContext
-import javax.net.ssl.X509TrustManager
-import java.security.cert.X509Certificate
-import java.util.concurrent.TimeUnit
 import org.conscrypt.Conscrypt
-
-import okhttp3.ConnectionSpec
-import okhttp3.TlsVersion
-
-import java.net.InetAddress
-import java.net.Socket
-import javax.net.ssl.SSLSocket
-import javax.net.ssl.SSLSocketFactory
-
-import android.util.Log
-
-/**
- * 强制所有连接只使用 TLS 1.3 的 SocketFactory
- */
-class Tls13OnlySocketFactory(private val delegate: SSLSocketFactory) : SSLSocketFactory() {
-
-    override fun getDefaultCipherSuites(): Array<String> = delegate.defaultCipherSuites
-    override fun getSupportedCipherSuites(): Array<String> = delegate.supportedCipherSuites
-
-    private fun enableTls13(socket: Socket): Socket {
-        if (socket is SSLSocket) {
-            socket.enabledProtocols = arrayOf("TLSv1.3")
-        }
-        return socket
-    }
-
-    override fun createSocket(): Socket = enableTls13(delegate.createSocket())
-    override fun createSocket(host: String, port: Int): Socket = enableTls13(delegate.createSocket(host, port))
-    override fun createSocket(host: String, port: Int, localHost: InetAddress, localPort: Int): Socket =
-        enableTls13(delegate.createSocket(host, port, localHost, localPort))
-    override fun createSocket(host: InetAddress, port: Int): Socket = enableTls13(delegate.createSocket(host, port))
-    override fun createSocket(address: InetAddress, port: Int, localAddress: InetAddress, localPort: Int): Socket =
-        enableTls13(delegate.createSocket(address, port, localAddress, localPort))
-    // 关键：必须实现的 Android 扩展方法
-    override fun createSocket(s: Socket, host: String, port: Int, autoClose: Boolean): Socket =
-        enableTls13(delegate.createSocket(s, host, port, autoClose))
-}
-
 
 /**
  * X系列基础库初始化
@@ -104,7 +60,6 @@ class XBasicLibInit private constructor() {
          * 初始化XHttp2
          */
         private fun initXHttp2(application: Application) {
-            /*
             //初始化网络请求框架，必须首先执行
             XHttpSDK.init(application)
             //需要调试的时候执行
@@ -127,53 +82,35 @@ class XBasicLibInit private constructor() {
             //.setRetryCount(SettingUtils.requestRetryTimes) //超时重试的次数
             //.setRetryDelay(SettingUtils.requestDelayTime * 1000) //超时重试的延迟时间
             //.setRetryIncreaseDelay(SettingUtils.requestDelayTime * 1000) //超时重试叠加延时
-            */
 
-            // 1. 必须首先执行
-            XHttpSDK.init(application)
-        
-            // 2. 构建支持 TLS 1.3 的自定义 OkHttpClient
-            val okHttpClient = buildTls13OkHttpClient()
-        
-            // 3. 注入到 XHttp2 中（注意是 XHttp 的实例方法）
-            XHttp.getInstance().setOkclient(okHttpClient)
-        
-            // 4. 设置全局 BaseUrl
-            XHttpSDK.setBaseUrl("https://gitee.com/")
-        
-            // 5. 调试开关
-            if (App.isDebug) {
-                XHttpSDK.debug()
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {  // Android 10 以下才需要
+                installConscrypt()
             }
-            
         }
 
-        private fun buildTls13OkHttpClient(): OkHttpClient {
-            val sslContext = SSLContext.getInstance("TLS", Conscrypt.newProvider())
-            sslContext.init(null, null, SecureRandom())
-        
-            val tls13Factory = Tls13OnlySocketFactory(sslContext.socketFactory)
-        
-            val trustAllManager = object : X509TrustManager {
-                override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {}
-                override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {}
-                override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+        private fun installConscrypt() {
+            try {
+                val provider = Conscrypt.newProvider()
+                Security.insertProviderAt(provider, 1)  // 设为最高优先级
+                
+                // 可选：显式设置 Conscrypt 的 SSLSocketFactory，确保 OkHttp 绑定
+                val sslContext = SSLContext.getInstance("TLS", provider)
+                val x509TrustManager = getDefaultTrustManager()
+                sslContext.init(null, arrayOf<X509TrustManager>(x509TrustManager), SecureRandom())
+                
+                XHttp.getOkHttpClientBuilder().sslSocketFactory(
+                    sslContext.socketFactory,
+                    x509TrustManager
+                )
+            } catch (e: Exception) {
+                Log.e("XHttp", "Failed to install Conscrypt", e)
             }
+        }
         
-            return OkHttpClient.Builder()
-                .sslSocketFactory(tls13Factory, trustAllManager)
-                .addInterceptor { chain ->
-                    val response = chain.proceed(chain.request())
-                    val handshake = response.handshake()          // 方法调用
-                    val tlsVersion = handshake?.tlsVersion()?.javaName()
-                    val cipher = handshake?.cipherSuite()?.javaName()
-                    Log.d("TlsTest", "协议: $tlsVersion, 加密套件: $cipher")
-                    response
-                }
-                .connectTimeout(SettingUtils.requestTimeout * 1000L, TimeUnit.MILLISECONDS)
-                .readTimeout(SettingUtils.requestTimeout * 1000L, TimeUnit.MILLISECONDS)
-                .writeTimeout(SettingUtils.requestTimeout * 1000L, TimeUnit.MILLISECONDS)
-                .build()
+        private fun getDefaultTrustManager(): X509TrustManager {
+            val tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
+            tmf.init(null as KeyStore?)
+            return tmf.trustManagers[0] as X509TrustManager
         }
 
         /**
