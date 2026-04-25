@@ -15,7 +15,15 @@ import com.xuexiang.xui.XUI
 import com.xuexiang.xutil.XUtil
 import com.xuexiang.xutil.common.StringUtils
 
+import android.os.Build
+import android.util.Log
 import org.conscrypt.Conscrypt
+import java.security.KeyStore
+import java.security.SecureRandom
+import java.security.Security
+import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManagerFactory
+import javax.net.ssl.X509TrustManager
 
 /**
  * X系列基础库初始化
@@ -83,7 +91,7 @@ class XBasicLibInit private constructor() {
             //.setRetryDelay(SettingUtils.requestDelayTime * 1000) //超时重试的延迟时间
             //.setRetryIncreaseDelay(SettingUtils.requestDelayTime * 1000) //超时重试叠加延时
 
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {  // Android 10 以下才需要
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
                 installConscrypt()
             }
         }
@@ -91,16 +99,15 @@ class XBasicLibInit private constructor() {
         private fun installConscrypt() {
             try {
                 val provider = Conscrypt.newProvider()
-                Security.insertProviderAt(provider, 1)  // 设为最高优先级
-                
-                // 可选：显式设置 Conscrypt 的 SSLSocketFactory，确保 OkHttp 绑定
+                Security.insertProviderAt(provider, 1)
+        
                 val sslContext = SSLContext.getInstance("TLS", provider)
-                val x509TrustManager = getDefaultTrustManager()
-                sslContext.init(null, arrayOf<X509TrustManager>(x509TrustManager), SecureRandom())
-                
+                val trustManager = getDefaultTrustManager()
+                sslContext.init(null, arrayOf<X509TrustManager>(trustManager), SecureRandom())
+        
                 XHttp.getOkHttpClientBuilder().sslSocketFactory(
                     sslContext.socketFactory,
-                    x509TrustManager
+                    trustManager
                 )
             } catch (e: Exception) {
                 Log.e("XHttp", "Failed to install Conscrypt", e)
@@ -110,7 +117,8 @@ class XBasicLibInit private constructor() {
         private fun getDefaultTrustManager(): X509TrustManager {
             val tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
             tmf.init(null as KeyStore?)
-            return tmf.trustManagers[0] as X509TrustManager
+            @Suppress("UNCHECKED_CAST")
+            return tmf.trustManagers.first { it is X509TrustManager } as X509TrustManager
         }
 
         /**
